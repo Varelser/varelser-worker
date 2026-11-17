@@ -1,0 +1,1 @@
+{"description":"HTTP-triggered job receiver for periodic bots, hosted on Render Free","engines":{"node":">=20"},"main":"server.js","name":"varelser-worker","private":true,"scripts":{"start":"node server.js"},"version":"1.0.0"}

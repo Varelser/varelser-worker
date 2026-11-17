@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: varelser-worker
+    env: node
+    plan: free
+    region: singapore
+    buildCommand: ""
+    startCommand: npm start
+    envVars:
+      - key: RUN_TOKEN
+        sync: false
