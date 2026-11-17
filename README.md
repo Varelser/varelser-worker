@@ -31,6 +31,16 @@ curl https://<service>.onrender.com/health
 curl -X POST -H "x-run-token: $RUN_TOKEN" https://<service>.onrender.com/run
 ```
 
+## レーン: museum
+
+`POST /run`（`?lane=museum` が既定）は Discord Museum 用の収集レーンです。
+
+- 既存の Muse 側 Museum ジョブと同じ 55 フィードを取得し、同じ選定ルール（45日以内の新しい順、出典が重ならないよう優先）で最大 2 件を選び、Discord embed を組み立てます
+- 記事 ID は既存コレクタと同じ方式（リンクの sha256 先頭 20 桁）なので、既存の seen.json と照合できます
+- リクエストボディで `{ "excludeIds": ["<id>", ...] }` を渡すと、その ID を候補から除外します。既存ジョブが投稿済みのものを再び選ばないための仕組みです
+- 環境変数 `DISCORD_MUSEUM_WEBHOOK_URL` が未設定の間は **dry-run** で、投稿せずに payload をレスポンスで返します。設定すると実際に投稿し、同一プロセス内では同じ記事を二度投稿しません
+- 日本語への翻訳・要約（既存ジョブでは LLM が担当）は未搭載で、タイトルと概要はフィードの原文のままです
+
 ## 制約（Render Free）
 
 - 15 分無通信でスピンダウンし、復帰に約 1 分かかります。常時接続のデーモンは置けません。

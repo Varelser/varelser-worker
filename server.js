@@ -12,6 +12,7 @@
 
 const http = require('http');
 const crypto = require('crypto');
+const { runMuseum } = require('./museum');
 
 const PORT = process.env.PORT || 10000;
 const RUN_TOKEN = process.env.RUN_TOKEN || '';
@@ -19,6 +20,7 @@ const SERVICE = 'varelser-worker';
 const startedAt = new Date();
 
 const runs = []; // newest first, max 20
+const postedIds = new Set(); // per-process dedupe for lanes that post
 let running = false;
 
 function tokenOk(req, url) {
@@ -34,16 +36,42 @@ function tokenOk(req, url) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
-async function runJob(trigger) {
-  // Placeholder job cycle. Keep it fast and side-effect free until a real
-  // lane is attached. Returns a small summary object.
+async function runJob(trigger, lane, opts = {}) {
+  // Lane dispatch. "museum" is the first real lane (see museum.js).
+  // Unknown lanes fall back to a recorded no-op cycle.
+  if (lane === 'museum') {
+    const excludeIds = Array.isArray(opts.excludeIds)
+      ? opts.excludeIds.filter((x) => typeof x === 'string').slice(0, 5000)
+      : [];
+    const result = await runMuseum(postedIds, excludeIds);
+    return { ...result, trigger, excludeIdsReceived: excludeIds.length };
+  }
   const t0 = Date.now();
   return {
     job: 'placeholder',
-    note: 'no bot lane attached yet; cycle recorded only',
+    note: `unknown lane "${lane}"; cycle recorded only`,
     trigger,
     durationMs: Date.now() - t0,
   };
+}
+
+function readBody(req) {
+  return new Promise((resolve) => {
+    const chunks = [];
+    let size = 0;
+    req.on('data', (c) => {
+      size += c.length;
+      if (size <= 65536) chunks.push(c);
+    });
+    req.on('end', () => {
+      try {
+        resolve(JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'));
+      } catch {
+        resolve({});
+      }
+    });
+    req.on('error', () => resolve({}));
+  });
 }
 
 function sendJson(res, code, obj) {
@@ -74,7 +102,7 @@ const server = http.createServer(async (req, res) => {
     return res.end(
       `${SERVICE}\n` +
       `GET /health  - health check (no auth)\n` +
-      `POST /run    - run one job cycle (needs RUN_TOKEN)\n` +
+      `POST /run    - run one job cycle (needs RUN_TOKEN); lane via ?lane=museum (default) or JSON {"lane":"museum"}\n` +
       `GET /runs    - last runs (needs RUN_TOKEN)\n`
     );
   }
@@ -90,15 +118,18 @@ const server = http.createServer(async (req, res) => {
     if (!tokenOk(req, url)) return sendJson(res, 401, { ok: false, error: 'invalid or missing token' });
     if (running) return sendJson(res, 409, { ok: false, error: 'a run is already in progress' });
     running = true;
+    const body = req.method === 'POST' ? await readBody(req) : {};
+    const lane = url.searchParams.get('lane') || body.lane || 'museum';
     const record = {
       id: runs.length ? runs[0].id + 1 : 1,
       startedAt: new Date().toISOString(),
       status: 'running',
+      lane,
     };
     runs.unshift(record);
     if (runs.length > 20) runs.length = 20;
     try {
-      const result = await runJob(req.method);
+      const result = await runJob(req.method, lane, body);
       record.status = 'ok';
       record.finishedAt = new Date().toISOString();
       record.result = result;
